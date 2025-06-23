@@ -1,0 +1,42 @@
+{
+  "login_test": [
+    {
+      "test_case": "valid_login",
+      "username": "admin",
+      "password": "admin123",
+      "expected_result": "success"
+    },
+    {
+      "test_case": "invalid_username",
+      "username": "invalid_user",
+      "password": "admin123",
+      "expected_result": "failure"
+    },
+    {
+      "test_case": "invalid_password",
+      "username": "admin",
+      "password": "wrong_password",
+      "expected_result": "failure"
+    },
+    {
+      "test_case": "empty_credentials",
+      "username": "",
+      "password": "",
+      "expected_result": "failure"
+    }
+  ],
+  "user_data": [
+    {
+      "username": "admin",
+      "password": "admin123",
+      "role": "administrator",
+      "email": "admin@example.com"
+    },
+    {
+      "username": "user",
+      "password": "user123",
+      "role": "user",
+      "email": "user@example.com"
+    }
+  ]
+}

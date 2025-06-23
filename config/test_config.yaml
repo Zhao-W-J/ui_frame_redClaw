@@ -1,0 +1,43 @@
+# 测试配置文件
+test:
+  base_url: "https://example.com"
+  environment: "dev"
+  retry_count: 2
+  implicit_wait: 10
+
+browser:
+  headless: false
+  slow_mo: 100
+  timeout: 30000
+  viewport:
+    width: 1920
+    height: 1080
+
+# 环境配置
+environments:
+  dev:
+    base_url: "https://dev.example.com"
+    database_url: "dev_db_connection_string"
+  test:
+    base_url: "https://test.example.com"
+    database_url: "test_db_connection_string"
+  prod:
+    base_url: "https://example.com"
+    database_url: "prod_db_connection_string"
+
+# 测试数据配置
+test_data:
+  users:
+    admin:
+      username: "admin"
+      password: "admin123"
+    regular_user:
+      username: "user"
+      password: "user123"
+
+# 报告配置
+reports:
+  screenshots_on_failure: true
+  video_recording: true
+  html_report: true
+  allure_report: true
