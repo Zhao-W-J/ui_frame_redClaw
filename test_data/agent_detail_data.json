@@ -1,0 +1,101 @@
+{
+  "agent_detail": {
+    "test_agent_name": "自动化测试_001",
+    "chat_message": "你好，这是一条自动化测试消息",
+    "expected_tabs": [
+      "状态",
+      "自我意识",
+      "心智",
+      "工具",
+      "技能",
+      "关系",
+      "工作区",
+      "聊天",
+      "工作日志",
+      "审批",
+      "设置"
+    ],
+    "status_texts": ["正在工作", "待命中"],
+    "token_cards": ["今日 Token", "本月 Token"],
+    "settings": {
+      "autonomy_levels": ["高", "中", "低"],
+      "visibility_options": ["公开", "部门可见", "仅自己可见"],
+      "model_name": "Qwen3.5-122B-A10B-FP8"
+    }
+  },
+  "enterprise": {
+    "expected_tabs": [
+      "部门信息",
+      "模型池",
+      "工具",
+      "技能管理",
+      "邀请码",
+      "配额",
+      "用户",
+      "组织管理",
+      "审批",
+      "审计日志"
+    ],
+    "dept_name": "测试部门",
+    "dept_description": "这是一个自动化测试部门",
+    "timezone": "Asia/Shanghai",
+    "broadcast_title": "测试广播通知",
+    "broadcast_content": "这是一条自动化测试广播通知",
+    "invitation_search_keyword": "test"
+  },
+  "admin": {
+    "expected_tabs": [
+      "公司仪表盘",
+      "公司设置",
+      "部门管理",
+      "公司模型池",
+      "技能管理"
+    ],
+    "dashboard_metrics": [
+      "Avg Tokens",
+      "Retention",
+      "Companies",
+      "Users",
+      "Token Usage"
+    ],
+    "new_dept_name": "自动化测试部门",
+    "smtp_config": {
+      "host": "smtp.example.com",
+      "port": "587",
+      "username": "test@example.com",
+      "password": "test_password"
+    }
+  },
+  "register": {
+    "valid_user": {
+      "username": "testuser_auto",
+      "email": "testuser_auto@example.com",
+      "password": "Test123456",
+      "display_name": "自动化测试用户"
+    },
+    "invalid_users": [
+      {
+        "username": "",
+        "email": "test@example.com",
+        "password": "Test123456",
+        "expected_error": "用户名不能为空"
+      },
+      {
+        "username": "test",
+        "email": "invalid_email",
+        "password": "Test123456",
+        "expected_error": "邮箱格式不正确"
+      },
+      {
+        "username": "test",
+        "email": "test@example.com",
+        "password": "123",
+        "expected_error": "密码长度不足"
+      }
+    ]
+  },
+  "global": {
+    "nav_links": ["广场", "仪表盘", "新建数字员工", "部门设置", "公司设置"],
+    "search_keyword": "测试"
+  }
+}

@@ -4,13 +4,14 @@ from pathlib import Path
 import os
 from datetime import datetime
 from typing import Generator
+from utils.config_reader import ConfigReader
 
 @pytest.fixture(scope="session")
 def browser_type_launch_args(pytestconfig):
     """浏览器启动参数"""
     return {
         "headless": False,
-        "slow_mo": 100,
+        "slow_mo": 1000,  # 每个操作之间等待1秒，方便观察
         "args": [
             "--disable-blink-features=AutomationControlled",
             "--disable-extensions",
@@ -101,4 +102,25 @@ def setup_test_environment():
     
     yield
     
-    print("测试环境清理完成") 
+    print("测试环境清理完成")
+
+@pytest.fixture(scope="session")
+def test_credentials():
+    """统一测试凭证 - 从配置文件读取，避免硬编码"""
+    config = ConfigReader()
+    return {
+        "admin_username": config.get("test_data.users.admin.username", "admin"),
+        "admin_password": config.get("test_data.users.admin.password", "123456"),
+        "regular_username": config.get("test_data.users.regular_user.username", "user"),
+        "regular_password": config.get("test_data.users.regular_user.password", "user123"),
+    }
+
+@pytest.fixture(scope="function")
+def logged_in_page(page: Page, test_credentials) -> Page:
+    """已登录的页面 fixture - 自动完成登录，后续测试直接使用"""
+    from pages.login_page import LoginPage
+    login_page = LoginPage(page)
+    login_page.navigate()
+    login_page.login(test_credentials["admin_username"], test_credentials["admin_password"])
+    page.wait_for_load_state("networkidle")
+    return page 

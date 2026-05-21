@@ -1,6 +1,6 @@
 # 测试配置文件
 test:
-  base_url: "https://example.com"
+  base_url: "http://redclaw.linkupai.cn:10089"
   environment: "dev"
   retry_count: 2
   implicit_wait: 10
@@ -16,13 +16,13 @@ browser:
 # 环境配置
 environments:
   dev:
-    base_url: "https://dev.example.com"
+    base_url: "http://redclaw.linkupai.cn:10089"
     database_url: "dev_db_connection_string"
   test:
-    base_url: "https://test.example.com"
+    base_url: "https://test.redclaw.example.com"
     database_url: "test_db_connection_string"
   prod:
-    base_url: "https://example.com"
+    base_url: "https://redclaw.example.com"
     database_url: "prod_db_connection_string"
 
 # 测试数据配置
@@ -30,10 +30,40 @@ test_data:
   users:
     admin:
       username: "admin"
-      password: "admin123"
+      password: "123456"
     regular_user:
       username: "user"
       password: "user123"
+
+# 页面配置
+pages:
+  login:
+    url: "/login"
+    load_indicator: 'text="请输入用户名"'
+  register:
+    url: "/register"
+    load_indicator: 'text="注册"'
+  plaza:
+    url: "/plaza"
+    load_indicator: 'text="智能体广场"'
+  dashboard:
+    url: "/dashboard"
+    load_indicator: 'text="数字员工"'
+  create_agent:
+    url: "/agents/new"
+    load_indicator: 'text="新建数字员工"'
+  agent_detail:
+    url: "/agents/"
+    load_indicator: 'h1'
+  enterprise:
+    url: "/enterprise"
+    load_indicator: 'text="部门设置"'
+  admin:
+    url: "/admin/platform-settings"
+    load_indicator: 'text="公司设置"'
+  messages:
+    url: "/messages"
+    load_indicator: 'text="消息"'
 
 # 报告配置
 reports:

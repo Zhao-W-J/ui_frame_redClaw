@@ -36,7 +36,7 @@ class PageUtils:
     
     def safe_click(self, selector: str, timeout: int = 30000) -> bool:
         """
-        安全点击元素
+        安全点击元素 - 仅用于可选元素，失败不抛异常
         
         Args:
             selector: 元素选择器
@@ -53,10 +53,25 @@ class PageUtils:
         except Exception as e:
             logger.error(f"点击元素失败: {selector}, 错误: {e}")
             return False
+
+    def click_element(self, selector: str, timeout: int = 30000) -> None:
+        """
+        严格点击元素 - 必须成功，失败抛异常
+        
+        Args:
+            selector: 元素选择器
+            timeout: 超时时间(毫秒)
+            
+        Raises:
+            Exception: 点击失败时抛出
+        """
+        element = self.wait_for_element(selector, timeout)
+        element.click()
+        logger.info(f"成功点击元素: {selector}")
     
     def safe_fill(self, selector: str, text: str, timeout: int = 30000) -> bool:
         """
-        安全填写文本
+        安全填写文本 - 仅用于可选元素，失败不抛异常
         
         Args:
             selector: 元素选择器
@@ -75,6 +90,23 @@ class PageUtils:
         except Exception as e:
             logger.error(f"填写文本失败: {selector}, 错误: {e}")
             return False
+
+    def fill_element(self, selector: str, text: str, timeout: int = 30000) -> None:
+        """
+        严格填写文本 - 必须成功，失败抛异常
+        
+        Args:
+            selector: 元素选择器
+            text: 要填写的文本
+            timeout: 超时时间(毫秒)
+            
+        Raises:
+            Exception: 填写失败时抛出
+        """
+        element = self.wait_for_element(selector, timeout)
+        element.clear()
+        element.fill(text)
+        logger.info(f"成功填写文本: {selector} = {text}")
     
     def get_text(self, selector: str, timeout: int = 30000) -> Optional[str]:
         """

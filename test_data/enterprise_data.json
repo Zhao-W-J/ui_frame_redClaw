@@ -1,0 +1,12 @@
+{
+  "enterprise": {
+    "dept_name": "测试部门",
+    "dept_description": "这是一个自动化测试部门",
+    "timezone": "Asia/Shanghai",
+    "broadcast_title": "测试广播通知",
+    "broadcast_content": "这是一条自动化测试广播通知",
+    "invitation_search_keyword": "test",
+    "invitation_batch_count": 5,
+    "invitation_max_uses": 10
+  }
+}

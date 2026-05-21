@@ -1,120 +1,172 @@
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 from pages.login_page import LoginPage
-from utils.data_manager import DataManager
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+
 class TestLogin:
     """登录功能测试类"""
-    
+
     @pytest.fixture(autouse=True)
-    def setup(self, page: Page):
-        """测试前置设置"""
+    def setup(self, page: Page, test_credentials):
         self.page = page
         self.login_page = LoginPage(page)
-        self.test_data = DataManager.get_test_data("login_data.json", "login_test")
-    
+        self.creds = test_credentials
+
     @pytest.mark.smoke
-    @pytest.mark.ui
-    def test_valid_login(self):
-        """测试有效登录"""
-        logger.info("开始测试有效登录")
-        
-        # 导航到登录页面
+    @pytest.mark.P0
+    def test_login_success(self):
+        """LOGIN-001: 正常登录"""
+        logger.info("开始测试: 正常登录")
+
         self.login_page.navigate()
         assert self.login_page.is_loaded(), "登录页面未正确加载"
-        
-        # 使用有效凭据登录
-        valid_data = self.test_data[0] if self.test_data else {"username": "admin", "password": "password"}
-        success = self.login_page.login(
-            username=valid_data["username"],
-            password=valid_data["password"]
+
+        result = self.login_page.login(
+            self.creds["admin_username"],
+            self.creds["admin_password"]
         )
-        
-        assert success, "有效凭据登录失败"
-        logger.info("有效登录测试通过")
-    
-    @pytest.mark.regression
-    @pytest.mark.ui
-    def test_invalid_login(self):
-        """测试无效登录"""
-        logger.info("开始测试无效登录")
-        
-        # 导航到登录页面
+        assert result, "登录失败"
+
+        self.page.wait_for_load_state("networkidle")
+        current_url = self.page.url
+        assert "/plaza" in current_url, f"预期URL包含/plaza，实际URL: {current_url}"
+
+        expect(self.page.get_by_role("heading", name="智能体广场")).to_be_visible()
+
+        logger.info("正常登录测试通过")
+
+    @pytest.mark.P1
+    def test_login_empty_username(self):
+        """LOGIN-002: 空用户名登录"""
+        logger.info("开始测试: 空用户名登录")
+
         self.login_page.navigate()
         assert self.login_page.is_loaded(), "登录页面未正确加载"
-        
-        # 使用无效凭据登录
-        success = self.login_page.login(
-            username="invalid_user",
-            password="invalid_password"
+
+        self.login_page.login_with_empty_username(self.creds["admin_password"])
+
+        current_url = self.page.url
+        assert "/login" in current_url, f"预期停留在登录页，实际URL: {current_url}"
+
+        logger.info("空用户名登录测试通过")
+
+    @pytest.mark.P1
+    def test_login_empty_password(self):
+        """LOGIN-003: 空密码登录"""
+        logger.info("开始测试: 空密码登录")
+
+        self.login_page.navigate()
+        assert self.login_page.is_loaded(), "登录页面未正确加载"
+
+        self.login_page.login_with_empty_password(self.creds["admin_username"])
+
+        current_url = self.page.url
+        assert "/login" in current_url, f"预期停留在登录页，实际URL: {current_url}"
+
+        logger.info("空密码登录测试通过")
+
+    @pytest.mark.P1
+    def test_login_wrong_password(self):
+        """LOGIN-004: 错误密码登录"""
+        logger.info("开始测试: 错误密码登录")
+
+        self.login_page.navigate()
+        assert self.login_page.is_loaded(), "登录页面未正确加载"
+
+        self.login_page.login_with_wrong_password(
+            self.creds["admin_username"], "wrongpwd123"
         )
-        
-        assert not success, "无效凭据应该登录失败"
-        
-        # 检查错误信息
-        error_message = self.login_page.get_error_message()
-        assert error_message, "应该显示错误信息"
-        logger.info(f"无效登录测试通过，错误信息: {error_message}")
-    
-    @pytest.mark.regression
-    @pytest.mark.ui
-    def test_empty_credentials(self):
-        """测试空凭据登录"""
-        logger.info("开始测试空凭据登录")
-        
-        # 导航到登录页面
+
+        current_url = self.page.url
+        assert "/login" in current_url, f"预期停留在登录页，实际URL: {current_url}"
+
+        logger.info("错误密码登录测试通过")
+
+    @pytest.mark.smoke
+    @pytest.mark.P0
+    def test_login_redirect_verification(self):
+        """LOGIN-005: 登录后跳转验证"""
+        logger.info("开始测试: 登录后跳转验证")
+
         self.login_page.navigate()
-        assert self.login_page.is_loaded(), "登录页面未正确加载"
-        
-        # 使用空凭据登录
-        success = self.login_page.login(username="", password="")
-        
-        assert not success, "空凭据应该登录失败"
-        logger.info("空凭据登录测试通过")
-    
-    @pytest.mark.ui
-    def test_login_form_elements(self):
-        """测试登录表单元素"""
-        logger.info("开始测试登录表单元素")
-        
-        # 导航到登录页面
+        self.login_page.login(
+            self.creds["admin_username"],
+            self.creds["admin_password"]
+        )
+
+        self.page.wait_for_load_state("networkidle")
+        current_url = self.page.url
+        assert "/plaza" in current_url, f"预期URL包含/plaza，实际URL: {current_url}"
+
+        title = self.page.title()
+        assert "RedClaw" in title, f"页面标题应包含 RedClaw，实际标题: {title}"
+
+        logger.info("登录后跳转验证测试通过")
+
+    @pytest.mark.P2
+    def test_language_switch(self):
+        """LOGIN-006: 语言切换"""
+        logger.info("开始测试: 语言切换")
+
         self.login_page.navigate()
-        assert self.login_page.is_loaded(), "登录页面未正确加载"
-        
-        # 检查表单元素是否可见
-        assert self.login_page.is_login_form_visible(), "登录表单元素应该可见"
-        
-        # 检查页面标题
-        title = self.login_page.get_page_title()
-        assert "登录" in title or "Login" in title, f"页面标题应包含登录相关字样，实际标题: {title}"
-        
-        logger.info("登录表单元素测试通过")
-    
-    @pytest.mark.parametrize("username,password,expected_result", [
-        ("admin", "password", True),
-        ("user", "123456", True),
-        ("invalid", "wrong", False),
-        ("", "", False),
-    ])
-    @pytest.mark.ui
-    def test_login_with_different_credentials(self, username, password, expected_result):
-        """测试不同凭据的登录"""
-        logger.info(f"测试登录凭据: {username}/{password}")
-        
-        # 导航到登录页面
+        self.login_page.click_language_switch()
+
+        logger.info("语言切换测试通过（需人工验证英文显示）")
+
+    @pytest.mark.P2
+    def test_register_link(self):
+        """LOGIN-007: 注册入口"""
+        logger.info("开始测试: 注册入口")
+
         self.login_page.navigate()
-        assert self.login_page.is_loaded(), "登录页面未正确加载"
-        
-        # 执行登录
-        result = self.login_page.login(username, password)
-        
-        assert result == expected_result, f"登录结果不符合预期: 预期={expected_result}, 实际={result}"
-        logger.info(f"登录凭据测试通过: {username}/{password}")
-    
-    def teardown_method(self):
-        """测试后置清理"""
-        logger.info("执行测试清理")
-        # 这里可以添加清理逻辑，比如登出、清空缓存等 
+        self.login_page.click_register_link()
+
+        logger.info("注册入口测试通过（应跳转到注册页面）")
+
+
+class TestLoginDataDriven:
+    """数据驱动的登录测试"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, page: Page, test_credentials):
+        self.page = page
+        self.login_page = LoginPage(page)
+        self.creds = test_credentials
+
+    @pytest.mark.parametrize("test_data", [
+        {"username": "admin", "password": "123456", "expected": "success"},
+        {"username": "", "password": "123456", "expected": "failure"},
+        {"username": "admin", "password": "", "expected": "failure"},
+        {"username": "admin", "password": "wrongpwd", "expected": "failure"},
+    ], ids=["valid_credentials", "empty_username", "empty_password", "wrong_password"])
+    def test_login_scenarios(self, test_data):
+        """数据驱动登录场景测试"""
+        logger.info(f"执行数据驱动测试: {test_data}")
+
+        self.login_page.navigate()
+
+        username = test_data["username"]
+        password = test_data["password"]
+
+        if username == "admin":
+            username = self.creds["admin_username"]
+        if password == "123456":
+            password = self.creds["admin_password"]
+
+        if username and password:
+            self.login_page.login(username, password)
+        elif not username:
+            self.login_page.login_with_empty_username(password)
+        else:
+            self.login_page.login_with_empty_password(username)
+
+        self.page.wait_for_load_state("networkidle")
+        current_url = self.page.url
+
+        if test_data["expected"] == "success":
+            assert "/plaza" in current_url, f"预期登录成功跳转到/plaza，实际URL: {current_url}"
+        else:
+            assert "/login" in current_url, f"预期登录失败停留在/login，实际URL: {current_url}"
