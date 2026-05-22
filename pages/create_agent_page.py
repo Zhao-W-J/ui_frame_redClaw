@@ -129,16 +129,32 @@ class CreateAgentPage(BasePage):
         role_input = self.page.get_by_placeholder("描述它的角色定位")
         role_input.fill(role)
 
-    def select_model(self, model_name: str = "Qwen3.5-122B-A10B-FP8"):
+    def select_model(self, model_name: str = "Qwen3.5-122B"):
         """选择主模型"""
         logger.info(f"选择主模型: {model_name}")
+        
         radio = self.page.get_by_role("radio", name=model_name)
         if radio.count() > 0:
             radio.click()
-        else:
-            radio = self.page.locator('label:has-text("{}")'.format(model_name))
+            logger.info(f"模型选择成功: {model_name}")
+            return
+        
+        fallback_patterns = [
+            f"{model_name} anthropic/{model_name}",
+            model_name.split("-")[0] if "-" in model_name else model_name
+        ]
+        
+        for pattern in fallback_patterns:
+            radio = self.page.get_by_role("radio", name=pattern)
             if radio.count() > 0:
                 radio.click()
+                logger.info(f"模型选择成功 (fallback): {pattern}")
+                return
+        
+        label = self.page.locator(f'text="{model_name}"').first
+        if label.count() > 0:
+            label.click()
+            logger.info(f"通过label点击模型: {model_name}")
 
     def set_daily_token_limit(self, limit: int | str):
         """设置每日Token上限"""

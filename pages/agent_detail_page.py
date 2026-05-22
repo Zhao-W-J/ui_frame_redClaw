@@ -1,4 +1,4 @@
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 from pages.base_page import BasePage
 from utils.logger import get_logger
 
@@ -80,11 +80,9 @@ class AgentDetailPage(BasePage):
 
     def click_chat_button(self):
         logger.info("点击对话按钮")
-        chat_btn = self.page.get_by_role("button", name="对话")
-        if chat_btn.count() > 0:
-            chat_btn.click()
-            return True
-        return False
+        chat_btn = self.page.get_by_role("button", name="对话").first
+        expect(chat_btn).to_be_visible(timeout=5000)
+        chat_btn.click()
 
     def click_renew_button(self):
         logger.info("点击续期按钮")
@@ -197,6 +195,71 @@ class AgentDetailPage(BasePage):
             self.page.keyboard.press("Enter")
             return True
         return False
+
+    def click_new_session_button(self):
+        logger.info("点击新建会话按钮")
+        new_session_btn = self.page.get_by_role("button", name="新建会话")
+        expect(new_session_btn).to_be_visible(timeout=5000)
+        new_session_btn.click()
+        self.page.wait_for_timeout(1000)
+
+    def click_skill_button(self):
+        logger.info("点击技能按钮")
+        skill_btn = self.page.get_by_role("button", name="技能")
+        expect(skill_btn).to_be_visible(timeout=5000)
+        skill_btn.click()
+        self.page.wait_for_timeout(1000)
+
+    def select_skill_from_dropdown(self, skill_name: str):
+        logger.info(f"选择技能: {skill_name}")
+        skill_option = self.page.get_by_role("button", name=f"C {skill_name}")
+        expect(skill_option).to_be_visible(timeout=5000)
+        skill_option.click()
+        self.page.wait_for_timeout(1000)
+
+    def type_chat_message(self, message: str):
+        logger.info(f"输入聊天消息: {message}")
+        message_input = self.page.get_by_role("textbox", name="输入消息")
+        expect(message_input).to_be_visible(timeout=5000)
+        message_input.fill(message)
+
+    def click_send_button(self):
+        logger.info("点击发送按钮")
+        send_btn = self.page.get_by_role("button", name="发送")
+        expect(send_btn).to_be_visible(timeout=5000)
+        send_btn.click()
+
+    def wait_for_response(self, timeout: int = 30000):
+        logger.info("等待AI响应")
+        try:
+            response_indicator = self.page.locator('text="分析中", text="思考中", text="生成中"')
+            if response_indicator.count() > 0:
+                response_indicator.first.wait_for(state="hidden", timeout=timeout)
+                return True
+            else:
+                self.page.wait_for_timeout(3000)
+                return True
+        except Exception as e:
+            logger.warning(f"等待响应超时: {e}")
+            return False
+
+    def is_message_sent(self, message: str) -> bool:
+        logger.info(f"验证消息是否发送成功: {message}")
+        message_element = self.page.locator(f'text="{message}"')
+        return message_element.count() > 0
+
+    def execute_conversation_flow(self, skill_name: str, message: str):
+        """执行完整的对话流程"""
+        logger.info(f"开始执行对话流程 - 技能: {skill_name}, 消息: {message}")
+
+        self.click_chat_button()
+        self.click_new_session_button()
+        self.click_skill_button()
+        self.select_skill_from_dropdown(skill_name)
+        self.type_chat_message(message)
+        self.click_send_button()
+
+        logger.info("对话流程完成")
 
     def click_new_session(self):
         logger.info("点击新建会话")

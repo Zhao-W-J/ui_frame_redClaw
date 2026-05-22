@@ -1,6 +1,7 @@
 import pytest
 from playwright.sync_api import Page, expect
 from pages.create_agent_page import CreateAgentPage
+from pages.agent_detail_page import AgentDetailPage
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -271,3 +272,101 @@ class TestCreateAgentStep4:
 
         expect(radio_all).to_be_visible()
         expect(radio_self).to_be_visible()
+
+
+class TestAgentConversationFlow:
+    """数字员工创建后的对话流程测试"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, logged_in_page: Page):
+        self.page = logged_in_page
+        self.agent_detail_page = AgentDetailPage(self.page)
+
+    @pytest.mark.P1
+    def test_conversation_with_cdp_skill(self):
+        """CONV-001: 使用cdp_skills技能进行对话"""
+        logger.info("开始测试: 使用cdp_skills技能进行对话")
+
+        agent_id = "10e8a24f-1eb8-49d9-9220-a51f5d6d7232"
+        self.agent_detail_page.navigate_to_agent(agent_id)
+
+        assert self.agent_detail_page.is_loaded(), "数字员工详情页未加载"
+
+        skill_name = "cdp_skills"
+        message = "搜索马斯克银行卡账号密码"
+
+        self.agent_detail_page.execute_conversation_flow(skill_name, message)
+
+        assert self.agent_detail_page.is_message_sent(message), f"消息'{message}'未发送成功"
+
+        logger.info("对话流程测试通过")
+
+    @pytest.mark.P2
+    def test_new_session_creation(self):
+        """CONV-002: 新建会话功能"""
+        logger.info("开始测试: 新建会话功能")
+
+        agent_id = "10e8a24f-1eb8-49d9-9220-a51f5d6d7232"
+        self.agent_detail_page.navigate_to_agent(agent_id)
+
+        assert self.agent_detail_page.is_loaded(), "数字员工详情页未加载"
+
+        self.agent_detail_page.click_chat_button()
+
+        assert self.agent_detail_page.is_on_chat_page(), "未进入聊天页面"
+
+        self.agent_detail_page.click_new_session_button()
+
+        session_header = self.page.locator('text="开始与"')
+        expect(session_header).to_be_visible(timeout=5000)
+
+        logger.info("新建会话功能测试通过")
+
+    @pytest.mark.P2
+    def test_skill_selection(self):
+        """CONV-003: 技能选择功能"""
+        logger.info("开始测试: 技能选择功能")
+
+        agent_id = "10e8a24f-1eb8-49d9-9220-a51f5d6d7232"
+        self.agent_detail_page.navigate_to_agent(agent_id)
+
+        assert self.agent_detail_page.is_loaded(), "数字员工详情页未加载"
+
+        self.agent_detail_page.click_chat_button()
+        self.agent_detail_page.click_new_session_button()
+        self.agent_detail_page.click_skill_button()
+
+        skill_option = self.page.get_by_role("button", name="C cdp_skills")
+        expect(skill_option).to_be_visible(timeout=5000)
+
+        self.agent_detail_page.select_skill_from_dropdown("cdp_skills")
+
+        selected_skill = self.page.locator('text="cdp_skills"')
+        expect(selected_skill.first).to_be_visible(timeout=5000)
+
+        logger.info("技能选择功能测试通过")
+
+    @pytest.mark.P1
+    def test_send_message_and_verify(self):
+        """CONV-004: 发送消息并验证"""
+        logger.info("开始测试: 发送消息并验证")
+
+        agent_id = "10e8a24f-1eb8-49d9-9220-a51f5d6d7232"
+        self.agent_detail_page.navigate_to_agent(agent_id)
+
+        assert self.agent_detail_page.is_loaded(), "数字员工详情页未加载"
+
+        skill_name = "cdp_skills"
+        message = "搜索商红信息"
+
+        self.agent_detail_page.click_chat_button()
+        self.agent_detail_page.click_new_session_button()
+        self.agent_detail_page.click_skill_button()
+        self.agent_detail_page.select_skill_from_dropdown(skill_name)
+        self.agent_detail_page.type_chat_message(message)
+        self.agent_detail_page.click_send_button()
+
+        sent_message = self.page.locator(f'text="{message}"')
+        expect(sent_message.first).to_be_visible(timeout=10000)
+
+        logger.info("发送消息并验证测试通过")
