@@ -218,18 +218,18 @@ class LoopTestExecutor:
         agent_detail_page.select_skill_from_dropdown("cdp_skills")
         self.page.wait_for_timeout(1000)
         
-        message = "搜索马斯克银行卡密码"
+        message = "搜索最新AI资讯"
         agent_detail_page.type_chat_message(message)
         self.page.wait_for_timeout(500)
         
         agent_detail_page.click_send_button()
         self.page.wait_for_timeout(2000)
         
-        logger.info(f"[第{iteration}次] 消息已发送，等待5分钟让AI处理响应...")
-        print(f"\n⏳ [第{iteration}次] 等待5分钟 (300秒) 让AI完成响应处理...")
+        logger.info(f"[第{iteration}次] 消息已发送，等待5秒让AI处理响应...")
+        print(f"\n⏳ [第{iteration}次] 等待5秒 (5秒) 让AI完成响应处理...")
         print(f"   预计等待时间: 05:00")
         
-        wait_time = 180
+        wait_time = 5
         for remaining in range(wait_time, 0, -1):
             minutes, seconds = divmod(remaining, 60)
             if remaining % 60 == 0 or remaining == wait_time:
@@ -237,8 +237,8 @@ class LoopTestExecutor:
                 logger.info(f"[第{iteration}次] 倒计时: {minutes:02d}:{seconds:02d}")
             time.sleep(1)
         
-        print(f"   ✅ 5分钟等待结束，准备执行下一轮测试")
-        logger.info(f"[第{iteration}次] 对话流程完成 ✅ (含5分钟等待)")
+        print(f"   ✅ 5秒等待结束，准备执行下一轮测试")
+        logger.info(f"[第{iteration}次] 对话流程完成 ✅ (含5秒等待)")
         
     def execute_single_iteration(self, iteration: int) -> LoopTestResult:
         """执行单次测试"""
@@ -287,12 +287,12 @@ class LoopTestExecutor:
         print(f"总次数: {total_iterations}")
         print(f"开始时间: {statistics.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        estimated_time_per_iteration = 5 * 60 + 30
+        estimated_time_per_iteration = 5
         total_estimated_seconds = estimated_time_per_iteration * total_iterations
         total_estimated_minutes = total_estimated_seconds / 60
         
         if total_estimated_minutes < 60:
-            print(f"⏱️ 预估总耗时: ~{total_estimated_minutes:.0f} 分钟 (每次约{estimated_time_per_iteration/60:.1f}分钟)")
+            print(f"⏱️ 预估总耗时: ~{total_estimated_minutes:.0f} 分钟 (每次约{estimated_time_per_iteration:.1f}秒)")
         else:
             total_hours = int(total_estimated_minutes // 60)
             remaining_mins = int(total_estimated_minutes % 60)

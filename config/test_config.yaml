@@ -1,6 +1,6 @@
 # 测试配置文件
 test:
-  base_url: "http://10.11.150.76:10088"
+  base_url: "http://10.11.150.73:10088"
   environment: "dev"
   retry_count: 2
   implicit_wait: 10
