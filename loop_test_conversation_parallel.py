@@ -1,35 +1,29 @@
 """
-并行循环测试脚本 - 同时打开3个页面创建数字员工
-功能：使用多线程同时执行3个独立的测试流程
-特点：每个线程有独立的浏览器、页面、登录会话
+并行循环测试脚本 - 多进程版本（真·并行）
+功能：同时启动多个进程，每个进程独立运行完整测试流程
+特点：绕过Python GIL限制，实现真正的并行执行
 """
 
 import sys
 import os
 import time
-import threading
+import multiprocessing
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict
-from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from multiprocessing import Process, Queue, Value
 
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
+# 必须在主进程导入配置模块
 from utils.config_reader import ConfigReader
-from utils.logger import get_logger
-from pages.login_page import LoginPage
-from pages.create_agent_page import CreateAgentPage
-from pages.agent_detail_page import AgentDetailPage
-
-logger = get_logger(__name__)
 
 
 class ParallelTestResult:
     """单次并行测试结果"""
-    def __init__(self, thread_id: int, iteration: int):
-        self.thread_id = thread_id
+    def __init__(self, process_id: int, iteration: int):
+        self.process_id = process_id
         self.iteration = iteration
         self.success = False
         self.error_message = ""
@@ -52,283 +46,198 @@ class ParallelTestResult:
         if self.start_time and self.end_time:
             self.duration = (self.end_time - self.start_time).total_seconds()
 
-
-class ParallelTestStatistics:
-    """并行测试统计信息"""
-    def __init__(self, total_iterations: int, parallel_count: int):
-        self.total_iterations = total_iterations
-        self.parallel_count = parallel_count
-        self.success_count = 0
-        self.failure_count = 0
-        self.results: List[ParallelTestResult] = []
-        self.start_time = None
-        self.end_time = None
-        self.lock = threading.Lock()
-
-    def add_result(self, result: ParallelTestResult):
-        with self.lock:
-            self.results.append(result)
-            if result.success:
-                self.success_count += 1
-            else:
-                self.failure_count += 1
-
-    def get_success_rate(self) -> float:
-        if self.total_iterations == 0:
-            return 0.0
-        return (self.success_count / self.total_iterations) * 100
-
-    def get_average_duration(self) -> float:
-        if not self.results:
-            return 0.0
-        total_duration = sum(r.duration for r in self.results)
-        return total_duration / len(self.results)
-
-    def print_summary(self):
-        """打印统计摘要"""
-        with self.lock:
-            print("\n" + "=" * 80)
-            print("📊 并行测试执行统计摘要")
-            print("=" * 80)
-            print(f"并行数量: {self.parallel_count} 个浏览器")
-            print(f"总执行次数: {self.total_iterations}")
-            print(f"成功次数: {self.success_count} ✅")
-            print(f"失败次数: {self.failure_count} ❌")
-            print(f"成功率: {self.get_success_rate():.2f}%")
-            print(f"平均耗时: {self.get_average_duration():.2f} 秒")
-            
-            if self.start_time and self.end_time:
-                total_time = (self.end_time - self.start_time).total_seconds()
-                print(f"总耗时: {total_time:.2f} 秒 ({total_time/60:.2f} 分钟)")
-                
-                # 计算加速比
-                single_thread_estimated = total_time * self.parallel_count
-                speedup = single_thread_estimated / total_time if total_time > 0 else 0
-                print(f"⚡ 加速比: ~{speedup:.2f}x (相比单线程)")
-            
-            print("=" * 80)
-            
-            if self.failure_count > 0:
-                print("\n❌ 失败详情:")
-                for result in self.results:
-                    if not result.success:
-                        print(f"  [线程{result.thread_id}] 第{result.iteration}次: {result.error_message}")
-                print("=" * 80)
+    def to_dict(self) -> dict:
+        return {
+            "process_id": self.process_id,
+            "iteration": self.iteration,
+            "success": self.success,
+            "error_message": self.error_message,
+            "agent_name": self.agent_name,
+            "agent_id": self.agent_id,
+            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "duration": self.duration
+        }
 
 
-class ParallelTestWorker:
-    """单个并行工作线程"""
+def worker_process(process_id: int, iterations: int, result_queue: Queue, 
+                   counter: Value, total_iterations: int):
+    """
+    工作进程函数 - 每个进程完全独立运行
     
-    def __init__(self, config: ConfigReader, thread_id: int):
-        self.config = config
-        self.thread_id = thread_id
-        self.base_url = config.get("test.base_url", "http://10.11.150.76:10088")
-        self.username = config.get("test_data.users.admin.username", "admin")
-        self.password = config.get("test_data.users.admin.password", "123456")
+    Args:
+        process_id: 进程ID (1, 2, 3)
+        iterations: 该进程需要执行的迭代次数
+        result_queue: 结果队列（用于收集结果）
+        counter: 共享计数器
+        total_iterations: 总迭代次数
+    """
+    # 每个进程重新导入（避免多进程导入问题）
+    from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
+    from utils.logger import get_logger
+    from pages.login_page import LoginPage
+    from pages.create_agent_page import CreateAgentPage
+    from pages.agent_detail_page import AgentDetailPage
+    
+    # 设置进程级日志
+    logger = get_logger(f"Process-{process_id}")
+    
+    try:
+        logger.info(f"[进程{process_id}] 🚀 启动工作进程")
         
-        self.browser: Browser = None
-        self.context: BrowserContext = None
-        self.page: Page = None
+        # ========== 初始化该进程的浏览器 ==========
+        logger.info(f"[进程{process_id}] 初始化浏览器环境...")
         
-    def setup(self):
-        """初始化该线程的浏览器和登录"""
-        logger.info(f"[线程{self.thread_id}] 初始化测试环境...")
+        pw = sync_playwright().start()
         
-        # 每个线程创建独立的 Playwright 实例
-        self.playwright_instance = sync_playwright().start()
-        
-        self.browser = self.playwright_instance.chromium.launch(
+        browser = pw.chromium.launch(
             headless=False,
-            slow_mo=300,
+            slow_mo=200,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-extensions",
                 "--no-sandbox",
-                f"--window-position={self.thread_id * 400},0",  # 窗口位置错开
+                f"--window-position={(process_id-1) * 450},0",  # 窗口位置错开
             ]
         )
         
-        self.context = self.browser.new_context(
+        context = browser.new_context(
             viewport={"width": 1280, "height": 720},
             ignore_https_errors=True,
-            user_agent=f"ParallelTestBot-Thread-{self.thread_id}",  # 不同UA避免冲突
+            user_agent=f"ParallelWorker-P{process_id}",
         )
         
-        self.page = self.context.new_page()
-        self.page.set_default_timeout(30000)
-        self.page.set_default_navigation_timeout(30000)
+        page = context.new_page()
+        page.set_default_timeout(30000)
+        page.set_default_navigation_timeout(30000)
         
-        logger.info(f"[线程{self.thread_id}] 执行登录...")
-        login_page = LoginPage(self.page)
+        # ========== 登录 ==========
+        config = ConfigReader()
+        base_url = config.get("test.base_url", "http://10.11.150.76:10088")
+        username = config.get("test_data.users.admin.username", "admin")
+        password = config.get("test_data.users.admin.password", "123456")
+        
+        logger.info(f"[进程{process_id}] 执行登录...")
+        login_page = LoginPage(page)
         login_page.navigate()
-        login_page.login(self.username, self.password)
-        self.page.wait_for_load_state("networkidle")
-        logger.info(f"[线程{self.thread_id}] 登录成功 ✅")
+        login_page.login(username, password)
+        page.wait_for_load_state("networkidle")
+        logger.info(f"[进程{process_id}] ✅ 登录成功")
         
-    def teardown(self):
-        """清理该线程的资源"""
-        logger.info(f"[线程{self.thread_id}] 清理测试环境...")
-        try:
-            if self.page:
-                self.page.close()
-            if self.context:
-                self.context.close()
-            if self.browser:
-                self.browser.close()
-            if hasattr(self, 'playwright_instance') and self.playwright_instance:
-                self.playwright_instance.stop()
-        except Exception as e:
-            logger.warning(f"[线程{self.thread_id}] 清理资源时出错: {e}")
-        logger.info(f"[线程{self.thread_id}] 测试环境清理完成 ✅")
-        
-    def create_agent(self, iteration: int) -> tuple:
-        """创建数字员工"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")
-        agent_name = f"并行测试_T{self.thread_id}_{iteration}_{timestamp}"
-        
-        logger.info(f"[线程{self.thread_id}][第{iteration}次] 创建数字员工: {agent_name}")
-        
-        create_page = CreateAgentPage(self.page)
-        create_page.navigate()
-        self.page.wait_for_load_state("networkidle")
-        
-        create_page.fill_name(agent_name)
-        create_page.fill_role(f"并行角色_T{self.thread_id}_{iteration}")
-        create_page.select_model()
-        
-        for _ in range(4):  # 点击4次下一步
-            create_page.click_next()
-            self.page.wait_for_timeout(1000)
-        
-        create_page.click_complete()
-        self.page.wait_for_load_state("networkidle")
-        self.page.wait_for_timeout(3000)
-        
-        current_url = self.page.url
-        if "/agents/" in current_url:
-            agent_id = current_url.split("/agents/")[-1].split("?")[0].split("#")[0]
-            logger.info(f"[线程{self.thread_id}][第{iteration}次] 数字员工创建成功 ✅ - ID: {agent_id}")
-            return agent_name, agent_id
-        else:
-            raise Exception("创建数字员工后未跳转到详情页")
-            
-    def execute_conversation_flow(self, iteration: int, agent_id: str):
-        """执行对话流程"""
-        logger.info(f"[线程{self.thread_id}][第{iteration}次] 执行对话流程...")
-        
-        agent_detail_page = AgentDetailPage(self.page, agent_id)
-        
-        agent_detail_page.click_chat_button()
-        self.page.wait_for_timeout(1000)
-        
-        agent_detail_page.click_new_session_button()
-        self.page.wait_for_timeout(1000)
-        
-        agent_detail_page.click_skill_button()
-        self.page.wait_for_timeout(1000)
-        
-        agent_detail_page.select_skill_from_dropdown("cdp_skills")
-        self.page.wait_for_timeout(1000)
-        
-        message = f"搜索最新AI资讯 (线程{self.thread_id})"
-        agent_detail_page.type_chat_message(message)
-        self.page.wait_for_timeout(500)
-        
-        agent_detail_page.click_send_button()
-        self.page.wait_for_timeout(2000)
-        
-        logger.info(f"[线程{self.thread_id}][第{iteration}次] 消息已发送，等待5秒...")
-        
-        time.sleep(5)  # 等待AI响应
-        
-        logger.info(f"[线程{self.thread_id}][第{iteration}次] 对话流程完成 ✅")
-        
-    def execute_single_iteration(self, iteration: int) -> ParallelTestResult:
-        """执行单次测试"""
-        result = ParallelTestResult(self.thread_id, iteration)
-        result.start_time = datetime.now()
-        
-        try:
-            print(f"\n[线程{self.thread_id}] {'='*60}")
-            print(f"[线程{self.thread_id}] 🔄 开始第 {iteration} 次测试")
-            print(f"[线程{self.thread_id}] {'='*60}")
-            
-            agent_name, agent_id = self.create_agent(iteration)
-            
-            self.execute_conversation_flow(iteration, agent_id)
-            
-            result.set_success(agent_name, agent_id)
-            print(f"[线程{self.thread_id}] ✅ 第 {iteration} 次测试成功!")
-            
-        except Exception as e:
-            error_msg = str(e)
-            result.set_failure(error_msg)
-            logger.error(f"[线程{self.thread_id}][第{iteration}次] 测试失败 ❌: {error_msg}")
-            print(f"[线程{self.thread_id}] ❌ 第 {iteration} 次测试失败: {error_msg}")
+        # ========== 执行循环测试 ==========
+        for i in range(1, iterations + 1):
+            result = ParallelTestResult(process_id, i)
+            result.start_time = datetime.now()
             
             try:
-                screenshot_path = f"reports/screenshots/parallel_test_T{self.thread_id}_failure_{iteration}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
-                self.page.screenshot(path=screenshot_path, full_page=True)
-                logger.info(f"[线程{self.thread_id}] 失败截图已保存: {screenshot_path}")
-            except:
-                pass
+                print(f"\n[进程{process_id}] {'='*60}")
+                print(f"[进程{process_id}] 🔄 执行第 {i}/{iterations} 次")
+                print(f"[进程{process_id}] {'='*60}")
                 
-        result.end_time = datetime.now()
-        result.calculate_duration()
-        
-        return result
-
-
-def worker_task(thread_id: int, iterations_per_thread: int, config: ConfigReader, 
-                statistics: ParallelTestStatistics) -> List[ParallelTestResult]:
-    """
-    工作线程任务函数
-    
-    Args:
-        thread_id: 线程ID (1, 2, 3)
-        iterations_per_thread: 该线程需要执行的迭代次数
-        config: 配置对象
-        statistics: 共享统计对象
-        
-    Returns:
-        该线程的所有测试结果列表
-    """
-    worker = ParallelTestWorker(config, thread_id)
-    results = []
-    
-    try:
-        worker.setup()
-        
-        for i in range(1, iterations_per_thread + 1):
-            result = worker.execute_single_iteration(i)
-            results.append(result)
-            statistics.add_result(result)
+                # 创建数字员工
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")
+                agent_name = f"并行P{process_id}_{i}_{timestamp}"
+                
+                logger.info(f"[进程{process_id}][第{i}次] 创建: {agent_name}")
+                
+                create_page = CreateAgentPage(page)
+                create_page.navigate()
+                page.wait_for_load_state("networkidle")
+                
+                create_page.fill_name(agent_name)
+                create_page.fill_role(f"P{process_id}_角色_{i}")
+                create_page.select_model()
+                
+                for _ in range(4):  # 4次下一步
+                    create_page.click_next()
+                    page.wait_for_timeout(800)
+                
+                create_page.click_complete()
+                page.wait_for_load_state("networkidle")
+                page.wait_for_timeout(2500)
+                
+                current_url = page.url
+                if "/agents/" in current_url:
+                    agent_id = current_url.split("/agents/")[-1].split("?")[0].split("#")[0]
+                    logger.info(f"[进程{process_id}] ✅ 创建成功 ID:{agent_id}")
+                    
+                    # 对话流程
+                    agent_detail = AgentDetailPage(page, agent_id)
+                    agent_detail.click_chat_button()
+                    page.wait_for_timeout(800)
+                    
+                    agent_detail.click_new_session_button()
+                    page.wait_for_timeout(800)
+                    
+                    agent_detail.click_skill_button()
+                    page.wait_for_timeout(800)
+                    
+                    agent_detail.select_skill_from_dropdown("cdp_skills")
+                    page.wait_for_timeout(800)
+                    
+                    agent_detail.type_chat_message(f"搜索AI资讯(P{process_id})")
+                    page.wait_for_timeout(500)
+                    
+                    agent_detail.click_send_button()
+                    page.wait_for_timeout(1500)
+                    
+                    print(f"[进程{process_id}] ⏳ 等待5秒...")
+                    time.sleep(5)
+                    
+                    result.set_success(agent_name, agent_id)
+                    print(f"[进程{process_id}] ✅ 第{i}次完成!")
+                    
+                else:
+                    raise Exception("未跳转到详情页")
+                    
+            except Exception as e:
+                error_msg = str(e)
+                result.set_failure(error_msg)
+                logger.error(f"[进程{process_id}] ❌ 第{i}次失败: {error_msg}")
+                print(f"[进程{process_id}] ❌ 第{i}次失败: {error_msg}")
+                
+                try:
+                    screenshot_path = f"reports/screenshots/multi_P{process_id}_{i}_{int(time.time())}.png"
+                    os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
+                    page.screenshot(path=screenshot_path, full_page=True)
+                except:
+                    pass
             
-            success_rate = statistics.get_success_rate()
-            total_done = len(statistics.results)
-            print(f"\n[线程{thread_id}] 📊 进度: {i}/{iterations_per_thread} | "
-                  f"总进度: {total_done}/{statistics.total_iterations} | "
-                  f"成功率: {success_rate:.2f}%\n")
-            
+            finally:
+                result.end_time = datetime.now()
+                result.calculate_duration()
+                
+                # 将结果放入队列
+                result_queue.put(result.to_dict())
+                
+                # 更新全局计数器
+                with counter.get_lock():
+                    counter.value += 1
+                
+                current_total = counter.value
+                print(f"\n[进程{process_id}] 📊 当前进度: {i}/{iterations} | "
+                      f"总进度: {current_total}/{total_iterations}\n")
+        
+        # 清理资源
+        logger.info(f"[进程{process_id}] 清理资源...")
+        page.close()
+        context.close()
+        browser.close()
+        pw.stop()
+        logger.info(f"[进程{process_id}] ✅ 进程正常结束")
+        
     except Exception as e:
-        logger.error(f"[线程{thread_id}] 工作线程发生严重错误: {e}", exc_info=True)
-        print(f"\n[线程{thread_id}] ⛔ 工作线程崩溃: {e}\n")
-        
-    finally:
-        worker.teardown()
-    
-    return results
+        logger.error(f"[进程{process_id}] ⛔ 进程崩溃: {e}", exc_info=True)
+        print(f"\n[进程{process_id}] ⛔ 进程异常退出: {e}\n")
 
 
 class ParallelTestExecutor:
-    """并行测试执行器"""
+    """并行测试执行器（多进程版）"""
     
-    def __init__(self, config: ConfigReader, parallel_count: int = 3):
-        self.config = config
+    def __init__(self, parallel_count: int = 3):
         self.parallel_count = parallel_count
         
-    def run(self, total_iterations: int = 200) -> ParallelTestStatistics:
+    def run(self, total_iterations: int = 200):
         """
         运行并行测试
         
@@ -336,80 +245,128 @@ class ParallelTestExecutor:
             total_iterations: 总测试次数
             
         Returns:
-            统计信息对象
+            统计信息字典
         """
-        statistics = ParallelTestStatistics(total_iterations, self.parallel_count)
-        statistics.start_time = datetime.now()
+        start_time = datetime.now()
         
         print("\n" + "=" * 80)
-        print("🚀 并行循环测试执行器启动")
+        print("🚀 并行循环测试执行器 (多进程·真并行)")
         print("=" * 80)
-        print(f"🔢 并行线程数: {self.parallel_count}")
+        print(f"⚡ 并行进程数: {self.parallel_count} (真正的并行!)")
         print(f"🎯 总测试次数: {total_iterations}")
-        print(f"⏰ 启动时间: {statistics.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"⏰ 启动时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # 计算每个线程的迭代次数
-        base_iterations = total_iterations // self.parallel_count
+        # 任务分配
+        base_iters = total_iterations // self.parallel_count
         remainder = total_iterations % self.parallel_count
-        
         iterations_list = []
+        
         for i in range(self.parallel_count):
-            iterations = base_iterations + (1 if i < remainder else 0)
-            iterations_list.append(iterations)
+            iters = base_iters + (1 if i < remainder else 0)
+            iterations_list.append(iters)
             
         print(f"\n📊 任务分配:")
-        for i, iters in enumerate(iterations_list, 1):
-            print(f"   线程{i}: {iters} 次")
+        for pid, iters in enumerate(iterations_list, 1):
+            print(f"   进程{pid}: {iters} 次")
         
-        # 预估时间
-        estimated_single_time = 15  # 单次预估时间（秒）
-        estimated_total = (total_iterations // self.parallel_count) * estimated_single_time
-        estimated_minutes = estimated_total / 60
-        
-        print(f"\n⏱️ 预估总耗时: ~{estimated_total}秒 ({estimated_minutes:.1f}分钟)")
-        print(f"(相比单线程提速约{self.parallel_count}倍)\n")
+        # 预估时间（相比单线程快N倍）
+        estimated_seconds = (base_iters * 15)  # 单次约15秒
+        print(f"\n⏱️ 预估总耗时: ~{estimated_seconds}秒 ({estimated_seconds/60:.1f}分钟)")
+        print(f"(加速比约: ~{self.parallel_count}x)\n")
         print("=" * 80)
         
-        try:
-            # 使用线程池执行并行任务
-            with ThreadPoolExecutor(max_workers=self.parallel_count) as executor:
-                futures = {}
-                
-                for thread_id in range(1, self.parallel_count + 1):
-                    future = executor.submit(
-                        worker_task,
-                        thread_id,
-                        iterations_list[thread_id - 1],
-                        self.config,
-                        statistics
-                    )
-                    futures[future] = thread_id
-                
-                # 等待所有线程完成
-                for future in as_completed(futures):
-                    thread_id = futures[future]
-                    try:
-                        future.result()  # 获取结果或抛出异常
-                    except Exception as e:
-                        logger.error(f"线程{thread_id}执行异常: {e}")
-                        
-        except KeyboardInterrupt:
-            print("\n\n⚠️ 用户中断测试执行")
-            logger.warning("用户中断测试执行")
-            
-        except Exception as e:
-            print(f"\n\n❌ 测试执行发生严重错误: {str(e)}")
-            logger.error(f"测试执行发生严重错误: {str(e)}")
-            
-        finally:
-            statistics.end_time = datetime.now()
-            statistics.print_summary()
-            self.save_report(statistics)
-            
-        return statistics
+        # 创建共享对象
+        result_queue = multiprocessing.Queue()
+        counter = Value('i', 0)  # 共享计数器
         
-    def save_report(self, statistics: ParallelTestStatistics):
-        """保存测试报告"""
+        # 启动多个进程
+        processes = []
+        print(f"\n🚀 正在启动 {self.parallel_count} 个并行进程...\n")
+        
+        for proc_id in range(1, self.parallel_count + 1):
+            p = Process(
+                target=worker_process,
+                args=(proc_id, iterations_list[proc_id-1], result_queue, counter, total_iterations),
+                name=f"Worker-Process-{proc_id}"
+            )
+            p.start()
+            processes.append(p)
+            print(f"   ✅ 进程{proc_id} 已启动 (PID: {p.pid})")
+            time.sleep(1)  # 错开启动时间
+        
+        print(f"\n{'='*80}")
+        print(f"✨ 所有 {self.parallel_count} 个进程已启动，开始并行执行...")
+        print(f"{'='*80}\n")
+        
+        # 等待所有进程完成
+        try:
+            for p in processes:
+                p.join(timeout=3600)  # 最长等1小时
+                
+        except KeyboardInterrupt:
+            print("\n\n⚠️ 用户中断，正在终止所有进程...")
+            for p in processes:
+                p.terminate()
+                p.join(timeout=5)
+        
+        # 收集结果
+        results = []
+        while not result_queue.empty():
+            try:
+                results.append(result_queue.get_nowait())
+            except:
+                break
+        
+        end_time = datetime.now()
+        
+        # 统计信息
+        success_count = sum(1 for r in results if r["success"])
+        fail_count = len(results) - success_count
+        
+        # 打印报告
+        self._print_report(start_time, end_time, total_iterations, 
+                          success_count, fail_count, results)
+        
+        # 保存报告
+        self._save_report(start_time, end_time, total_iterations,
+                         success_count, fail_count, results)
+        
+        return {
+            "success": success_count == total_iterations,
+            "success_count": success_count,
+            "fail_count": fail_count,
+            "results": results
+        }
+    
+    def _print_report(self, start_time, end_time, total, success, fail, results):
+        """打印统计报告"""
+        total_time = (end_time - start_time).total_seconds()
+        success_rate = (success / total * 100) if total > 0 else 0
+        
+        print(f"\n{'='*80}")
+        print("📊 并行测试最终报告")
+        print(f"{'='*80}")
+        print(f"并行进程数: {self.parallel_count}")
+        print(f"总执行次数: {total}")
+        print(f"成功次数: {success} ✅")
+        print(f"失败次数: {fail} ❌")
+        print(f"成功率: {success_rate:.2f}%")
+        print(f"实际耗时: {total_time:.2f}秒 ({total_time/60:.2f}分钟)")
+        
+        if total > 0 and self.parallel_count > 0:
+            speedup = (total_time * self.parallel_count) / total_time
+            print(f"⚡ 加速比: ~{speedup:.2f}x")
+        
+        print(f"{'='*80}")
+        
+        if fail > 0:
+            print("\n❌ 失败详情:")
+            for r in sorted(results, key=lambda x: (x['process_id'], x['iteration'])):
+                if not r['success']:
+                    print(f"  [进程{r['process_id']}] 第{r['iteration']}次: {r['error_message'][:50]}")
+    
+    def _save_report(self, start_time, end_time, total, success, fail, results):
+        """保存详细报告"""
         report_dir = Path("reports/parallel_test_reports")
         report_dir.mkdir(parents=True, exist_ok=True)
         
@@ -418,90 +375,74 @@ class ParallelTestExecutor:
         
         with open(report_file, "w", encoding="utf-8") as f:
             f.write("=" * 80 + "\n")
-            f.write("并行循环测试执行报告\n")
+            f.write("并行测试报告 (多进程版)\n")
             f.write("=" * 80 + "\n\n")
             
-            f.write(f"并行线程数: {statistics.parallel_count}\n")
-            f.write(f"执行时间: {statistics.start_time.strftime('%Y-%m-%d %H:%M:%S')} - {statistics.end_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"总执行次数: {statistics.total_iterations}\n")
-            f.write(f"成功次数: {statistics.success_count}\n")
-            f.write(f"失败次数: {statistics.failure_count}\n")
-            f.write(f"成功率: {statistics.get_success_rate():.2f}%\n")
-            f.write(f"平均耗时: {statistics.get_average_duration():.2f} 秒\n\n")
-            
-            if statistics.start_time and statistics.end_time:
-                total_time = (statistics.end_time - statistics.start_time).total_seconds()
-                f.write(f"总实际耗时: {total_time:.2f} 秒 ({total_time/60:.2f} 分钟)\n")
-                f.write(f"理论单线程耗时: ~{total_time * statistics.parallel_count:.2f} 秒\n")
-                f.write(f"加速比: ~{statistics.parallel_count:.2f}x\n\n")
+            f.write(f"并行进程数: {self.parallel_count}\n")
+            f.write(f"时间范围: {start_time} ~ {end_time}\n")
+            f.write(f"总次数: {total} | 成功: {success} | 失败: {fail}\n")
+            f.write(f"成功率: {(success/total*100):.2f}%\n\n")
             
             f.write("=" * 80 + "\n")
             f.write("详细结果:\n")
             f.write("=" * 80 + "\n\n")
             
-            # 按线程分组显示结果
             from collections import defaultdict
-            by_thread = defaultdict(list)
-            for result in statistics.results:
-                by_thread[result.thread_id].append(result)
+            by_process = defaultdict(list)
+            for r in results:
+                by_process[r['process_id']].append(r)
             
-            for thread_id in sorted(by_thread.keys()):
-                f.write(f"【线程{thread_id}】\n")
-                for result in by_thread[thread_id]:
-                    status = "✅ 成功" if result.success else "❌ 失败"
-                    f.write(f"  第{result.iteration}次: {status}\n")
-                    if result.success:
-                        f.write(f"    数字员工名称: {result.agent_name}\n")
-                        f.write(f"    数字员工ID: {result.agent_id}\n")
+            for pid in sorted(by_process.keys()):
+                f.write(f"【进程{pid}】\n")
+                for r in sorted(by_process[pid], key=lambda x: x['iteration']):
+                    status = "✅" if r['success'] else "❌"
+                    f.write(f"  第{r['iteration']:3d}次 {status} ")
+                    if r['success']:
+                        f.write(f"| 名称: {r['agent_name'][:30]} | 耗时: {r['duration']:.1f}s\n")
                     else:
-                        f.write(f"    错误信息: {result.error_message}\n")
-                    f.write(f"    耗时: {result.duration:.2f} 秒\n\n")
-                    
-        print(f"\n📄 测试报告已保存: {report_file}")
-        logger.info(f"测试报告已保存: {report_file}")
+                        f.write(f"| 错误: {r['error_message'][:60]}\n")
+                f.write("\n")
+        
+        print(f"\n📄 报告已保存: {report_file}")
 
 
 def main():
     """主函数"""
     print("\n" + "=" * 80)
-    print("🔄 并行循环测试执行脚本")
-    print("   特点：同时打开3个浏览器窗口并行执行测试")
+    print("🔄 并行循环测试脚本 (多进程·真并行)")
+    print("   特点: 绕过GIL限制，真正的并行处理!")
     print("=" * 80)
     
     total_iterations = 200
-    parallel_count = 3  # 默认3个并行
+    parallel_count = 3
     
-    # 解析命令行参数
+    # 解析参数
     if len(sys.argv) > 1:
         try:
             total_iterations = int(sys.argv[1])
         except ValueError:
-            print(f"⚠️ 无效的总次数参数，使用默认值: {total_iterations}")
+            pass
     
     if len(sys.argv) > 2:
         try:
             parallel_count = int(sys.argv[2])
-            if not (1 <= parallel_count <= 10):
-                raise ValueError("并行数必须在1-10之间")
-        except ValueError as e:
-            print(f"⚠️ 无效的并行数参数: {e}，使用默认值: {parallel_count}")
+            parallel_count = max(1, min(parallel_count, 10))  # 限制1-10
+        except ValueError:
+            pass
     
-    print(f"\n配置信息:")
-    print(f"  📌 总测试次数: {total_iterations}")
-    print(f"  🔢 并行线程数: {parallel_count}")
-    print(f"  📊 每线程约: {total_iterations // parallel_count} 次")
+    print(f"\n配置:")
+    print(f"  📌 总次数: {total_iterations}")
+    print(f"  🔢 进程数: {parallel_count}")
     print(f"{'='*80}\n")
     
-    config = ConfigReader()
-    executor = ParallelTestExecutor(config, parallel_count)
+    executor = ParallelTestExecutor(parallel_count)
+    result = executor.run(total_iterations)
     
-    statistics = executor.run(total_iterations)
-    
-    if statistics.success_count == statistics.total_iterations:
-        print("\n🎉 所有测试全部通过!")
+    if result['success']:
+        print("\n🎉 全部通过!")
         sys.exit(0)
     else:
-        print(f"\n⚠️ 有 {statistics.failure_count} 次测试失败")
+        print(f"\n⚠️ 有 {result['fail_count']} 次失败")
         sys.exit(1)
 
 
